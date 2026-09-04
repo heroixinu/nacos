@@ -206,11 +206,81 @@ class AuthorizationCodeHandlerTest {
                 mapper);
             String state = ReflectionTestUtils.invokeMethod(handler, "buildSignedState", "nonce",
                 System.currentTimeMillis() + 60_000L);
-            
+
             OidcUser result = handler.exchangeCodeForUser("code", state, "http://nacos/callback");
-            
+
             assertEquals("nacos", result.getUsername());
             assertEquals("access-token", result.getToken());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void testExchangeCodeUsesIdTokenForConsoleWhenConfigured() throws Exception {
+        String idToken = plainJwt();
+        HttpServer server = startTokenServer(200, tokenSuccessBody(idToken));
+        try {
+            JwtTokenValidator validator = mock(JwtTokenValidator.class);
+            OidcUserMapper mapper = mock(OidcUserMapper.class);
+            JWTClaimsSet claims = new JWTClaimsSet.Builder().subject("subject")
+                .claim("nonce", "nonce").build();
+            OidcUser user = new OidcUser();
+            user.setUsername("nacos");
+            when(validator.validate(idToken)).thenReturn(claims);
+            when(mapper.mapToUser(claims)).thenReturn(user);
+            OidcAuthConfig config = tokenConfig(server, true);
+            when(config.useIdTokenForConsole()).thenReturn(true);
+            when(config.getConsoleTokenSource()).thenReturn("id_token");
+            AuthorizationCodeHandler handler = newHandler(config, validator, mapper);
+            String state = ReflectionTestUtils.invokeMethod(handler, "buildSignedState", "nonce",
+                System.currentTimeMillis() + 60_000L);
+
+            OidcUser result = handler.exchangeCodeForUser("code", state, "http://nacos/callback");
+
+            assertEquals(idToken, result.getToken());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void testExchangeCodeRejectsMissingIdToken() throws Exception {
+        HttpServer server = startTokenServer(200,
+            "{\"access_token\":\"access-token\",\"token_type\":\"Bearer\"}");
+        try {
+            AuthorizationCodeHandler handler = newHandler(tokenConfig(server, true));
+            String state = ReflectionTestUtils.invokeMethod(handler, "buildSignedState", "nonce",
+                System.currentTimeMillis() + 60_000L);
+
+            assertThrows(AccessException.class,
+                () -> handler.exchangeCodeForUser("code", state, "http://nacos/callback"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void testExchangeCodeRejectsMissingAccessTokenByDefault() throws Exception {
+        String idToken = plainJwt();
+        HttpServer server = startTokenServer(200,
+            "{\"token_type\":\"Bearer\",\"id_token\":\"" + idToken + "\"}");
+        try {
+            JwtTokenValidator validator = mock(JwtTokenValidator.class);
+            OidcUserMapper mapper = mock(OidcUserMapper.class);
+            JWTClaimsSet claims = new JWTClaimsSet.Builder().subject("subject")
+                .claim("nonce", "nonce").build();
+            OidcUser user = new OidcUser();
+            user.setUsername("nacos");
+            when(validator.validate(idToken)).thenReturn(claims);
+            when(mapper.mapToUser(claims)).thenReturn(user);
+            AuthorizationCodeHandler handler = newHandler(tokenConfig(server, true), validator,
+                mapper);
+            String state = ReflectionTestUtils.invokeMethod(handler, "buildSignedState", "nonce",
+                System.currentTimeMillis() + 60_000L);
+
+            assertThrows(AccessException.class,
+                () -> handler.exchangeCodeForUser("code", state, "http://nacos/callback"));
         } finally {
             server.stop(0);
         }
@@ -239,7 +309,7 @@ class AuthorizationCodeHandlerTest {
             AuthorizationCodeHandler handler = newHandler(tokenConfig(server, true));
             String state = ReflectionTestUtils.invokeMethod(handler, "buildSignedState", "nonce",
                 System.currentTimeMillis() + 60_000L);
-            
+
             assertThrows(AccessException.class,
                 () -> handler.exchangeCodeForUser("code", state, "http://nacos/callback"));
         } finally {

@@ -53,6 +53,8 @@ public class OidcAuthConfig {
     
     private String tokenValidationMethod;
     
+    private String consoleTokenSource;
+
     private long jwksCacheTtlSeconds;
     
     private String usernameClaim;
@@ -62,7 +64,7 @@ public class OidcAuthConfig {
     private String adminRole;
     
     private boolean autoCreateUser;
-    
+
     /**
      * Whether to enforce strict nonce validation (default true).
      */
@@ -127,6 +129,14 @@ public class OidcAuthConfig {
         this.scope = getProperty(OidcConstants.CONFIG_SCOPE, OidcConstants.DEFAULT_SCOPE);
         this.tokenValidationMethod = getProperty(OidcConstants.CONFIG_TOKEN_VALIDATION_METHOD,
             OidcConstants.DEFAULT_TOKEN_VALIDATION_METHOD);
+        this.consoleTokenSource = getProperty(OidcConstants.CONFIG_CONSOLE_TOKEN_SOURCE,
+            OidcConstants.DEFAULT_CONSOLE_TOKEN_SOURCE);
+        if (!OidcConstants.CONSOLE_TOKEN_SOURCE_ACCESS_TOKEN.equalsIgnoreCase(consoleTokenSource)
+            && !OidcConstants.CONSOLE_TOKEN_SOURCE_ID_TOKEN.equalsIgnoreCase(consoleTokenSource)) {
+            LOGGER.warn("Unsupported OIDC console-token-source '{}', fallback to '{}'",
+                consoleTokenSource, OidcConstants.DEFAULT_CONSOLE_TOKEN_SOURCE);
+            this.consoleTokenSource = OidcConstants.DEFAULT_CONSOLE_TOKEN_SOURCE;
+        }
         this.jwksCacheTtlSeconds = Long.parseLong(
             getProperty(OidcConstants.CONFIG_JWKS_CACHE_TTL,
                 String.valueOf(OidcConstants.DEFAULT_JWKS_CACHE_TTL_SECONDS)));
@@ -152,8 +162,11 @@ public class OidcAuthConfig {
             getProperty(OidcConstants.CONFIG_AUTHORIZATION_TIMEOUT_MS,
                 String.valueOf(OidcConstants.DEFAULT_AUTHORIZATION_TIMEOUT_MS)));
         
-        LOGGER.info("OIDC auth config loaded: issuerUri={}, clientId={}, tokenValidationMethod={}",
-            issuerUri, clientId, tokenValidationMethod);
+        LOGGER.info(
+            "OIDC auth config loaded: issuerUri={}, clientId={}, tokenValidationMethod={}, "
+                + "consoleTokenSource={}",
+            issuerUri, clientId, tokenValidationMethod,
+            consoleTokenSource);
         
         // Perform OIDC Discovery
         if (StringUtils.isNotBlank(issuerUri)) {
@@ -289,6 +302,24 @@ public class OidcAuthConfig {
         return tokenValidationMethod;
     }
     
+    /**
+     * Get the token source delivered to the Nacos console after login.
+     *
+     * @return console token source
+     */
+    public String getConsoleTokenSource() {
+        return consoleTokenSource;
+    }
+
+    /**
+     * Check whether the validated ID token should be used as the console token.
+     *
+     * @return true when ID token is used for the console session
+     */
+    public boolean useIdTokenForConsole() {
+        return OidcConstants.CONSOLE_TOKEN_SOURCE_ID_TOKEN.equalsIgnoreCase(consoleTokenSource);
+    }
+
     public void setTokenValidationMethod(String tokenValidationMethod) {
         this.tokenValidationMethod = tokenValidationMethod;
     }

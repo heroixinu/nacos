@@ -57,7 +57,7 @@ public class OidcAuthenticationManager {
         this.tokenValidator = JwtTokenValidator.getInstance();
         this.userMapper = OidcUserMapper.getInstance();
     }
-    
+
     /**
      * Get singleton instance.
      *
@@ -87,6 +87,8 @@ public class OidcAuthenticationManager {
         }
         
         // Validate the token
+        LOGGER.debug("Validating OIDC bearer token: format={}, length={}",
+            detectTokenFormat(token), token.length());
         JWTClaimsSet claims = tokenValidator.validate(token);
         
         // Map claims to user
@@ -120,6 +122,18 @@ public class OidcAuthenticationManager {
         return authenticate(token);
     }
     
+    private String detectTokenFormat(String token) {
+        if (StringUtils.isBlank(token)) {
+            return "missing";
+        }
+        int firstDot = token.indexOf('.');
+        int secondDot = firstDot < 0 ? -1 : token.indexOf('.', firstDot + 1);
+        int thirdDot = secondDot < 0 ? -1 : token.indexOf('.', secondDot + 1);
+        return firstDot > 0 && secondDot > firstDot + 1 && thirdDot < 0
+            ? "jwt-like"
+            : "opaque";
+    }
+
     /**
      * Extract Bearer token from identity context.
      *

@@ -116,11 +116,11 @@ public class AuthorizationCodeHandler {
             if (StringUtils.isBlank(authEndpoint)) {
                 throw new AccessException("Authorization endpoint not configured");
             }
-            
+
             // Generate nonce for security
             String nonce = generateSecureToken();
             long expirationTime = System.currentTimeMillis() + STATE_EXPIRATION_MS;
-            
+
             // Build self-contained signed state: base64(nonce.expTime.signature)
             // This eliminates the need for server-side state storage (cluster-friendly)
             String state = buildSignedState(nonce, expirationTime);
@@ -171,6 +171,10 @@ public class AuthorizationCodeHandler {
             
             // Validate ID token
             String idTokenString = tokens.getIDTokenString();
+            if (StringUtils.isBlank(idTokenString)) {
+                LOGGER.warn("OIDC token response does not contain id_token");
+                throw new AccessException("ID token is required");
+            }
             JWTClaimsSet claims = tokenValidator.validate(idTokenString);
             
             // Verify nonce matches (protects against token replay attacks)
@@ -197,7 +201,34 @@ public class AuthorizationCodeHandler {
             
             // Map claims to user
             OidcUser user = userMapper.mapToUser(claims);
-            user.setToken(tokens.getAccessToken().getValue());
+            String accessToken = tokens.getAccessToken() == null
+                ? null
+                : tokens.getAccessToken().getValue();
+
+            LOGGER.info(
+                "OIDC token exchange succeeded for user={}, accessTokenFormat={}, "
+                    + "accessTokenLength={}, idTokenFormat={}, idTokenLength={}, "
+                    + "consoleTokenSource={}",
+                user.getUsername(), detectTokenFormat(accessToken),
+                tokenLength(accessToken), detectTokenFormat(idTokenString),
+                tokenLength(idTokenString),
+                config.getConsoleTokenSource());
+
+            if (config.useIdTokenForConsole()) {
+                // The validated ID token is used as the Nacos console credential for opaque IdPs.
+                user.setToken(idTokenString);
+                LOGGER.info("OIDC console session token selected: id_token, user={}",
+                    user.getUsername());
+            } else {
+                if (StringUtils.isBlank(accessToken)) {
+                    LOGGER.warn("OIDC token response does not contain access_token, user={}",
+                        user.getUsername());
+                    throw new AccessException("Access token is required");
+                }
+                user.setToken(accessToken);
+                LOGGER.info("OIDC console session token selected: access_token, user={}",
+                    user.getUsername());
+            }
             
             LOGGER.info("User authenticated via authorization code: {}", user.getUsername());
             return user;
@@ -252,6 +283,22 @@ public class AuthorizationCodeHandler {
         return oidcResponse.getOIDCTokens();
     }
     
+    private String detectTokenFormat(String token) {
+        if (StringUtils.isBlank(token)) {
+            return "missing";
+        }
+        int firstDot = token.indexOf('.');
+        int secondDot = firstDot < 0 ? -1 : token.indexOf('.', firstDot + 1);
+        int thirdDot = secondDot < 0 ? -1 : token.indexOf('.', secondDot + 1);
+        return firstDot > 0 && secondDot > firstDot + 1 && thirdDot < 0
+            ? "jwt-like"
+            : "opaque";
+    }
+
+    private int tokenLength(String token) {
+        return token == null ? 0 : token.length();
+    }
+
     /**
      * Generate a secure random token for state/nonce.
      *

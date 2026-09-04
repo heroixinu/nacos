@@ -69,6 +69,13 @@ public final class OidcConstants {
         CONFIG_PREFIX + "token-validation-method";
     
     /**
+     * Token delivered to the Nacos console after OIDC login.
+     * Supported values: access_token, id_token.
+     */
+    public static final String CONFIG_CONSOLE_TOKEN_SOURCE =
+        CONFIG_PREFIX + "console-token-source";
+
+    /**
      * JWKS cache TTL in seconds.
      */
     public static final String CONFIG_JWKS_CACHE_TTL = CONFIG_PREFIX + "jwks-cache-ttl-seconds";
@@ -124,6 +131,15 @@ public final class OidcConstants {
      */
     public static final String DEFAULT_TOKEN_VALIDATION_METHOD = "jwt";
     
+    /**
+     * Default console token source, preserving the upstream behavior.
+     */
+    public static final String DEFAULT_CONSOLE_TOKEN_SOURCE = "access_token";
+
+    public static final String CONSOLE_TOKEN_SOURCE_ACCESS_TOKEN = "access_token";
+
+    public static final String CONSOLE_TOKEN_SOURCE_ID_TOKEN = "id_token";
+
     /**
      * Default JWKS cache TTL: 1 hour.
      */

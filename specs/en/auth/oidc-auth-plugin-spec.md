@@ -70,6 +70,7 @@ OIDC plugin configuration uses the `nacos.core.auth.plugin.oidc.` prefix:
 | `client-secret` | empty | OAuth2 client secret. Also used by the current implementation for signed state. |
 | `scope` | `openid profile email` | Scopes requested during browser login. |
 | `token-validation-method` | `jwt` | Declared validation mode. Current server code validates JWTs through JWKS. |
+| `console-token-source` | `access_token` | Token delivered to the browser Console after login: `access_token` or validated `id_token`. |
 | `jwks-cache-ttl-seconds` | `3600` | JWKS cache TTL. |
 | `username-claim` | `preferred_username` | Claim used as the Nacos display username. |
 | `roles-claim` | `roles` | Primary claim used to extract roles. |
@@ -104,6 +105,9 @@ The login flow must:
 - Generate a self-contained signed `state` value and a `nonce`.
 - Exchange the authorization code at the IdP token endpoint.
 - Validate the ID token signature and claims before accepting the user.
+- Deliver `access_token` to the Console by default; when `console-token-source=id_token`,
+  deliver the already validated ID token instead. This option affects only the Nacos
+  Console session credential and does not change Java client token acquisition.
 - Deliver short-lived console cookies only as a handoff mechanism for the
   frontend, then rely on normal request identity propagation.
 
@@ -138,7 +142,7 @@ mapped role. For non-admin users it calls the configured external
 
 | Field | Meaning |
 |-------|---------|
-| `token` | User access token. |
+| `token` | The token held by the authenticated Nacos session. This is normally the user access token; when `console-token-source=id_token`, it is the validated ID token. |
 | `resource` | Nacos resource URI derived from `Resource`. |
 | `action` | Nacos action, such as read or write. |
 | `resourceType`, `namespace`, `group`, `resourceName` | Structured Nacos resource identity. |
@@ -146,7 +150,9 @@ mapped role. For non-admin users it calls the configured external
 If `authorization-endpoint` is empty, the current implementation allows
 non-admin access. Deployments that need authorization isolation must configure
 an external authorization endpoint or provide a stricter OIDC authority
-provider.
+provider. An external authorization endpoint that requires the original opaque
+access token is incompatible with `console-token-source=id_token`; use a provider
+that accepts the Console credential or implement a server-side token mapping.
 
 ## Java Client Integration
 

@@ -65,6 +65,7 @@ OIDC 插件配置使用 `nacos.core.auth.plugin.oidc.` 前缀：
 | `client-secret` | 空 | OAuth2 client secret。当前实现也用它签名 state。 |
 | `scope` | `openid profile email` | 浏览器登录时请求的 scope。 |
 | `token-validation-method` | `jwt` | 声明的 token 校验模式。当前服务端代码通过 JWKS 校验 JWT。 |
+| `console-token-source` | `access_token` | 登录后交给浏览器控制台的 token：`access_token` 或已校验的 `id_token`。 |
 | `jwks-cache-ttl-seconds` | `3600` | JWKS 缓存 TTL。 |
 | `username-claim` | `preferred_username` | 作为 Nacos 展示用户名的 claim。 |
 | `roles-claim` | `roles` | 提取角色时优先使用的 claim。 |
@@ -96,6 +97,8 @@ authorization endpoint discovery 和 token endpoint discovery。
 - 生成自包含签名的 `state` 和 `nonce`。
 - 在 IdP token endpoint 交换 authorization code。
 - 接受用户前校验 ID token 签名和 claims。
+- 默认将 `access_token` 交给控制台；当配置 `console-token-source=id_token` 时，改为交给控制台
+  已经校验过的 ID token。该选项只影响 Nacos 控制台会话凭据，不改变 Java 客户端获取 token 的流程。
 - 只把短期 console cookie 作为前端交接机制，随后依赖正常请求身份传播。
 
 ## Token 校验
@@ -124,13 +127,15 @@ Nacos 资源执行目标动作。
 
 | 字段 | 含义 |
 |------|------|
-| `token` | 用户 access token。 |
+| `token` | 已认证 Nacos 会话持有的 token。通常是用户 access token；当配置 `console-token-source=id_token` 时，是已经校验过的 ID token。 |
 | `resource` | 从 `Resource` 推导出的 Nacos resource URI。 |
 | `action` | Nacos action，例如 read 或 write。 |
 | `resourceType`, `namespace`, `group`, `resourceName` | 结构化的 Nacos 资源身份。 |
 
 如果 `authorization-endpoint` 为空，当前实现会允许非管理员访问。需要授权隔离的部署必须
-配置外部 authorization endpoint，或提供更严格的 OIDC authority provider。
+配置外部 authorization endpoint，或提供更严格的 OIDC authority provider。如果外部 authorization
+endpoint 强依赖原始 opaque access token，则不能配置 `console-token-source=id_token`；应改用接受控制台
+凭据的 provider，或实现服务端 token 映射。
 
 ## Java 客户端集成
 

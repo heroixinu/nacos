@@ -60,6 +60,8 @@ class OidcAuthConfigTest {
         assertTrue(config.isJwtValidation());
         assertFalse(config.isIntrospectionValidation());
         assertEquals(OidcConstants.DEFAULT_SCOPE, config.getScope());
+        assertEquals(OidcConstants.DEFAULT_CONSOLE_TOKEN_SOURCE, config.getConsoleTokenSource());
+        assertFalse(config.useIdTokenForConsole());
         assertEquals(OidcConstants.DEFAULT_JWKS_CACHE_TTL_SECONDS,
             config.getJwksCacheTtlSeconds());
         assertEquals(OidcConstants.DEFAULT_USERNAME_CLAIM, config.getUsernameClaim());
@@ -79,6 +81,7 @@ class OidcAuthConfigTest {
             .withProperty(OidcConstants.CONFIG_CLIENT_SECRET, "secret")
             .withProperty(OidcConstants.CONFIG_SCOPE, "openid")
             .withProperty(OidcConstants.CONFIG_TOKEN_VALIDATION_METHOD, "introspection")
+            .withProperty(OidcConstants.CONFIG_CONSOLE_TOKEN_SOURCE, "ID_TOKEN")
             .withProperty(OidcConstants.CONFIG_JWKS_CACHE_TTL, "12")
             .withProperty(OidcConstants.CONFIG_USERNAME_CLAIM, "email")
             .withProperty(OidcConstants.CONFIG_ROLES_CLAIM, "groups")
@@ -89,12 +92,14 @@ class OidcAuthConfigTest {
             .withProperty(OidcConstants.CONFIG_AUTHORIZATION_ENDPOINT, "http://idp/authz")
             .withProperty(OidcConstants.CONFIG_AUTHORIZATION_TIMEOUT_MS, "99");
         EnvUtil.setEnvironment(environment);
-        
+
         OidcAuthConfig config = OidcAuthConfig.getInstance();
         
         assertEquals("client", config.getClientId());
         assertEquals("secret", config.getClientSecret());
         assertEquals("openid", config.getScope());
+        assertEquals("ID_TOKEN", config.getConsoleTokenSource());
+        assertTrue(config.useIdTokenForConsole());
         assertTrue(config.isIntrospectionValidation());
         assertEquals(12L, config.getJwksCacheTtlSeconds());
         assertEquals("email", config.getUsernameClaim());
@@ -107,6 +112,18 @@ class OidcAuthConfigTest {
         assertEquals(99L, config.getAuthorizationTimeoutMs());
     }
     
+    @Test
+    void testInvalidConsoleTokenSourceFallsBackToAccessToken() {
+        EnvUtil.setEnvironment(new MockEnvironment()
+            .withProperty(OidcConstants.CONFIG_CONSOLE_TOKEN_SOURCE, "unsupported"));
+        ReflectionTestUtils.setField(OidcAuthConfig.class, "instance", null);
+
+        OidcAuthConfig config = OidcAuthConfig.getInstance();
+
+        assertEquals(OidcConstants.DEFAULT_CONSOLE_TOKEN_SOURCE, config.getConsoleTokenSource());
+        assertFalse(config.useIdTokenForConsole());
+    }
+
     @Test
     void testReloadRefreshesConfiguration() {
         MockEnvironment firstEnvironment = new MockEnvironment()
