@@ -69,6 +69,12 @@ public final class OidcConstants {
         CONFIG_PREFIX + "token-validation-method";
     
     /**
+     * Provider compatibility mode. Supported values: standard, anycross.
+     */
+    public static final String CONFIG_PROVIDER_COMPATIBILITY =
+        CONFIG_PREFIX + "provider-compatibility";
+    
+    /**
      * JWKS cache TTL in seconds.
      */
     public static final String CONFIG_JWKS_CACHE_TTL = CONFIG_PREFIX + "jwks-cache-ttl-seconds";
@@ -123,6 +129,15 @@ public final class OidcConstants {
      * Default token validation method.
      */
     public static final String DEFAULT_TOKEN_VALIDATION_METHOD = "jwt";
+    
+    /**
+     * Default provider compatibility mode keeps the upstream behavior unchanged.
+     */
+    public static final String DEFAULT_PROVIDER_COMPATIBILITY = "standard";
+    
+    public static final String PROVIDER_COMPATIBILITY_STANDARD = "standard";
+    
+    public static final String PROVIDER_COMPATIBILITY_ANYCROSS = "anycross";
     
     /**
      * Default JWKS cache TTL: 1 hour.
