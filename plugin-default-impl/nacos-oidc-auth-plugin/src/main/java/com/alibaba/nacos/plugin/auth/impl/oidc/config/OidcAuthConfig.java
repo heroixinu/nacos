@@ -53,6 +53,8 @@ public class OidcAuthConfig {
     
     private String tokenValidationMethod;
     
+    private String providerCompatibility;
+    
     private long jwksCacheTtlSeconds;
     
     private String usernameClaim;
@@ -63,26 +65,14 @@ public class OidcAuthConfig {
     
     private boolean autoCreateUser;
     
-    /**
-     * Whether to enforce strict nonce validation (default true).
-     */
     private boolean strictNonceValidation;
     
-    /**
-     * Whether to enforce strict audience validation (default true).
-     */
     private boolean strictAudienceValidation;
     
-    /**
-     * External authorization endpoint (IdP handles all authorization).
-     */
     private String authorizationEvaluateEndpoint;
     
     private long authorizationTimeoutMs;
     
-    /**
-     * Discovered JWKS URI from OIDC well-known configuration.
-     */
     private String jwksUri;
     
     private String authorizationEndpoint;
@@ -97,11 +87,6 @@ public class OidcAuthConfig {
         loadConfig();
     }
     
-    /**
-     * Get singleton instance.
-     *
-     * @return OidcAuthConfig instance
-     */
     public static OidcAuthConfig getInstance() {
         if (instance == null) {
             synchronized (OidcAuthConfig.class) {
@@ -113,9 +98,6 @@ public class OidcAuthConfig {
         return instance;
     }
     
-    /**
-     * Reload configuration from environment.
-     */
     public void reload() {
         loadConfig();
     }
@@ -127,6 +109,14 @@ public class OidcAuthConfig {
         this.scope = getProperty(OidcConstants.CONFIG_SCOPE, OidcConstants.DEFAULT_SCOPE);
         this.tokenValidationMethod = getProperty(OidcConstants.CONFIG_TOKEN_VALIDATION_METHOD,
             OidcConstants.DEFAULT_TOKEN_VALIDATION_METHOD);
+        this.providerCompatibility = getProperty(OidcConstants.CONFIG_PROVIDER_COMPATIBILITY,
+            OidcConstants.DEFAULT_PROVIDER_COMPATIBILITY);
+        if (!OidcConstants.PROVIDER_COMPATIBILITY_STANDARD.equalsIgnoreCase(providerCompatibility)
+            && !OidcConstants.PROVIDER_COMPATIBILITY_ANYCROSS.equalsIgnoreCase(providerCompatibility)) {
+            LOGGER.warn("Unsupported OIDC provider-compatibility '{}', fallback to '{}'",
+                providerCompatibility, OidcConstants.DEFAULT_PROVIDER_COMPATIBILITY);
+            this.providerCompatibility = OidcConstants.DEFAULT_PROVIDER_COMPATIBILITY;
+        }
         this.jwksCacheTtlSeconds = Long.parseLong(
             getProperty(OidcConstants.CONFIG_JWKS_CACHE_TTL,
                 String.valueOf(OidcConstants.DEFAULT_JWKS_CACHE_TTL_SECONDS)));
@@ -138,24 +128,20 @@ public class OidcAuthConfig {
             getProperty(OidcConstants.CONFIG_ADMIN_ROLE, OidcConstants.DEFAULT_ADMIN_ROLE);
         this.autoCreateUser = Boolean.parseBoolean(
             getProperty(OidcConstants.CONFIG_AUTO_CREATE_USER, "true"));
-        
-        // Security validation settings
         this.strictNonceValidation = Boolean.parseBoolean(
             getProperty(OidcConstants.CONFIG_STRICT_NONCE_VALIDATION, "true"));
         this.strictAudienceValidation = Boolean.parseBoolean(
             getProperty(OidcConstants.CONFIG_STRICT_AUDIENCE_VALIDATION, "true"));
-        
-        // External authorization endpoint (IdP handles all authorization)
         this.authorizationEvaluateEndpoint =
             getProperty(OidcConstants.CONFIG_AUTHORIZATION_ENDPOINT, "");
         this.authorizationTimeoutMs = Long.parseLong(
             getProperty(OidcConstants.CONFIG_AUTHORIZATION_TIMEOUT_MS,
                 String.valueOf(OidcConstants.DEFAULT_AUTHORIZATION_TIMEOUT_MS)));
         
-        LOGGER.info("OIDC auth config loaded: issuerUri={}, clientId={}, tokenValidationMethod={}",
-            issuerUri, clientId, tokenValidationMethod);
+        LOGGER.info(
+            "OIDC auth config loaded: issuerUri={}, clientId={}, tokenValidationMethod={}, providerCompatibility={}",
+            issuerUri, clientId, tokenValidationMethod, providerCompatibility);
         
-        // Perform OIDC Discovery
         if (StringUtils.isNotBlank(issuerUri)) {
             try {
                 doOidcDiscovery(issuerUri);
@@ -168,24 +154,19 @@ public class OidcAuthConfig {
     private void doOidcDiscovery(String issuer) {
         String discoveryUrl = issuer.replaceAll("/$", "") + OidcProtocolConstants.WELL_KNOWN_PATH;
         LOGGER.info("Fetching OIDC configuration from: {}", discoveryUrl);
-        
         try {
             HttpClient client = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofMillis(5000))
                 .build();
-            
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(discoveryUrl))
                 .GET()
                 .timeout(Duration.ofMillis(5000))
                 .build();
-            
             HttpResponse<String> response =
                 client.send(request, HttpResponse.BodyHandlers.ofString());
-            
             if (response.statusCode() == 200) {
                 JsonNode configNode = JacksonUtils.toObj(response.body());
-                
                 if (configNode != null) {
                     if (configNode.has(OidcProtocolConstants.DISCOVERY_AUTHORIZATION_ENDPOINT)) {
                         this.authorizationEndpoint = configNode
@@ -207,7 +188,6 @@ public class OidcAuthConfig {
                         this.jwksUri =
                             configNode.get(OidcProtocolConstants.DISCOVERY_JWKS_URI).asText();
                     }
-                    
                     LOGGER.info("OIDC Discovery successful. Auth Endpoint: {}, Token Endpoint: {}",
                         authorizationEndpoint, tokenEndpoint);
                 }
@@ -224,34 +204,22 @@ public class OidcAuthConfig {
         return StringUtils.isBlank(value) ? defaultValue : value;
     }
     
-    /**
-     * Check if the configuration is valid.
-     *
-     * @return true if configuration is valid
-     */
     public boolean isValid() {
         return StringUtils.isNotBlank(issuerUri) && StringUtils.isNotBlank(clientId);
     }
     
-    /**
-     * Check if JWT validation method is used.
-     *
-     * @return true if JWT validation
-     */
     public boolean isJwtValidation() {
         return "jwt".equalsIgnoreCase(tokenValidationMethod);
     }
     
-    /**
-     * Check if token introspection method is used.
-     *
-     * @return true if introspection validation
-     */
     public boolean isIntrospectionValidation() {
         return "introspection".equalsIgnoreCase(tokenValidationMethod);
     }
     
-    // ==================== Getters and Setters ====================
+    public boolean isAnyCrossCompatibilityEnabled() {
+        return OidcConstants.PROVIDER_COMPATIBILITY_ANYCROSS
+            .equalsIgnoreCase(providerCompatibility);
+    }
     
     public String getIssuerUri() {
         return issuerUri;
@@ -291,6 +259,10 @@ public class OidcAuthConfig {
     
     public void setTokenValidationMethod(String tokenValidationMethod) {
         this.tokenValidationMethod = tokenValidationMethod;
+    }
+    
+    public String getProviderCompatibility() {
+        return providerCompatibility;
     }
     
     public long getJwksCacheTtlSeconds() {
