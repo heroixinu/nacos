@@ -165,6 +165,9 @@ public class AuthorizationCodeHandler {
             
             // Validate ID token
             String idTokenString = tokens.getIDTokenString();
+            if (StringUtils.isBlank(idTokenString)) {
+                throw new AccessException("ID token is required");
+            }
             JWTClaimsSet claims = tokenValidator.validate(idTokenString);
             
             // Verify nonce matches (protects against token replay attacks)
@@ -189,11 +192,12 @@ public class AuthorizationCodeHandler {
                 throw new AccessException(message);
             }
             
-            // Map claims to user
+            // Map claims to user and select the credential used by subsequent Console requests.
             OidcUser user = userMapper.mapToUser(claims);
-            user.setToken(tokens.getAccessToken().getValue());
+            user.setToken(selectConsoleToken(tokens, idTokenString));
             
-            LOGGER.info("User authenticated via authorization code: {}", user.getUsername());
+            LOGGER.info("User authenticated via authorization code: {}, consoleTokenSource={}",
+                user.getUsername(), config.getConsoleTokenSource());
             return user;
             
         } catch (AccessException e) {
@@ -202,6 +206,18 @@ public class AuthorizationCodeHandler {
             LOGGER.error("Failed to exchange code for tokens", e);
             throw new AccessException("Authentication failed: " + e.getMessage());
         }
+    }
+    
+    private String selectConsoleToken(OIDCTokens tokens, String idTokenString)
+        throws AccessException {
+        if (config.isIdTokenConsoleTokenSource()) {
+            return idTokenString;
+        }
+        if (tokens.getAccessToken() == null
+            || StringUtils.isBlank(tokens.getAccessToken().getValue())) {
+            throw new AccessException("Access token is required");
+        }
+        return tokens.getAccessToken().getValue();
     }
     
     /**

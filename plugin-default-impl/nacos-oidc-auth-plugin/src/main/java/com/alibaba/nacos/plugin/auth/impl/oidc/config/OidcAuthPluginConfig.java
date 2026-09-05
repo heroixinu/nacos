@@ -38,6 +38,8 @@ public final class OidcAuthPluginConfig {
     
     public static final String TOKEN_VALIDATION_METHOD = "token-validation-method";
     
+    public static final String CONSOLE_TOKEN_SOURCE = "console-token-source";
+    
     public static final String JWKS_CACHE_TTL_SECONDS = "jwks-cache-ttl-seconds";
     
     public static final String USERNAME_CLAIM = "username-claim";
@@ -59,6 +61,12 @@ public final class OidcAuthPluginConfig {
     public static final String DEFAULT_SCOPE = "openid profile email";
     
     public static final String DEFAULT_TOKEN_VALIDATION_METHOD = "jwt";
+    
+    public static final String CONSOLE_TOKEN_SOURCE_ACCESS_TOKEN = "access_token";
+    
+    public static final String CONSOLE_TOKEN_SOURCE_ID_TOKEN = "id_token";
+    
+    public static final String DEFAULT_CONSOLE_TOKEN_SOURCE = CONSOLE_TOKEN_SOURCE_ACCESS_TOKEN;
     
     public static final long DEFAULT_JWKS_CACHE_TTL_SECONDS = 3600L;
     
@@ -86,6 +94,8 @@ public final class OidcAuthPluginConfig {
     
     private final String tokenValidationMethod;
     
+    private final String consoleTokenSource;
+    
     private final long jwksCacheTtlSeconds;
     
     private final String usernameClaim;
@@ -105,15 +115,16 @@ public final class OidcAuthPluginConfig {
     private final boolean strictAudienceValidation;
     
     private OidcAuthPluginConfig(String issuerUri, String clientId, String clientSecret,
-        String scope, String tokenValidationMethod, long jwksCacheTtlSeconds,
-        String usernameClaim, String rolesClaim, String adminRole, boolean autoCreateUser,
-        String authorizationEndpoint, long authorizationTimeoutMs,
+        String scope, String tokenValidationMethod, String consoleTokenSource,
+        long jwksCacheTtlSeconds, String usernameClaim, String rolesClaim, String adminRole,
+        boolean autoCreateUser, String authorizationEndpoint, long authorizationTimeoutMs,
         boolean strictNonceValidation, boolean strictAudienceValidation) {
         this.issuerUri = issuerUri;
         this.clientId = clientId;
         this.clientSecret = clientSecret;
         this.scope = scope;
         this.tokenValidationMethod = tokenValidationMethod;
+        this.consoleTokenSource = consoleTokenSource;
         this.jwksCacheTtlSeconds = jwksCacheTtlSeconds;
         this.usernameClaim = usernameClaim;
         this.rolesClaim = rolesClaim;
@@ -147,6 +158,8 @@ public final class OidcAuthPluginConfig {
         String scope = value(config, SCOPE, DEFAULT_SCOPE);
         String tokenValidationMethod = value(config, TOKEN_VALIDATION_METHOD,
             DEFAULT_TOKEN_VALIDATION_METHOD);
+        String consoleTokenSource = parseConsoleTokenSource(value(config, CONSOLE_TOKEN_SOURCE,
+            DEFAULT_CONSOLE_TOKEN_SOURCE));
         long jwksCacheTtlSeconds = parsePositiveLong(value(config, JWKS_CACHE_TTL_SECONDS,
             Long.toString(DEFAULT_JWKS_CACHE_TTL_SECONDS)), JWKS_CACHE_TTL_SECONDS);
         String usernameClaim = value(config, USERNAME_CLAIM, DEFAULT_USERNAME_CLAIM);
@@ -163,10 +176,16 @@ public final class OidcAuthPluginConfig {
         boolean strictAudienceValidation = parseBoolean(value(config,
             STRICT_AUDIENCE_VALIDATION, Boolean.toString(DEFAULT_STRICT_AUDIENCE_VALIDATION)),
             STRICT_AUDIENCE_VALIDATION);
+        if (CONSOLE_TOKEN_SOURCE_ID_TOKEN.equals(consoleTokenSource)
+            && StringUtils.isNotBlank(authorizationEndpoint)) {
+            throw new IllegalArgumentException("Plugin config '" + CONSOLE_TOKEN_SOURCE
+                + "=id_token' cannot be combined with '" + AUTHORIZATION_ENDPOINT
+                + "' because external authorization requires the OAuth access token");
+        }
         return new OidcAuthPluginConfig(issuerUri, clientId, clientSecret, scope,
-            tokenValidationMethod, jwksCacheTtlSeconds, usernameClaim, rolesClaim, adminRole,
-            autoCreateUser, authorizationEndpoint, authorizationTimeoutMs,
-            strictNonceValidation, strictAudienceValidation);
+            tokenValidationMethod, consoleTokenSource, jwksCacheTtlSeconds, usernameClaim,
+            rolesClaim, adminRole, autoCreateUser, authorizationEndpoint,
+            authorizationTimeoutMs, strictNonceValidation, strictAudienceValidation);
     }
     
     private static String value(Map<String, String> config, String key, String defaultValue) {
@@ -178,6 +197,17 @@ public final class OidcAuthPluginConfig {
             throw new IllegalArgumentException("Plugin config value cannot be null: " + key);
         }
         return StringUtils.isBlank(result) ? defaultValue : result;
+    }
+    
+    private static String parseConsoleTokenSource(String value) {
+        if (CONSOLE_TOKEN_SOURCE_ACCESS_TOKEN.equalsIgnoreCase(value)) {
+            return CONSOLE_TOKEN_SOURCE_ACCESS_TOKEN;
+        }
+        if (CONSOLE_TOKEN_SOURCE_ID_TOKEN.equalsIgnoreCase(value)) {
+            return CONSOLE_TOKEN_SOURCE_ID_TOKEN;
+        }
+        throw new IllegalArgumentException("Unsupported plugin config value for "
+            + CONSOLE_TOKEN_SOURCE + ": " + value);
     }
     
     private static long parsePositiveLong(String value, String key) {
@@ -212,6 +242,10 @@ public final class OidcAuthPluginConfig {
         return "introspection".equalsIgnoreCase(tokenValidationMethod);
     }
     
+    public boolean isIdTokenConsoleTokenSource() {
+        return CONSOLE_TOKEN_SOURCE_ID_TOKEN.equals(consoleTokenSource);
+    }
+    
     public String getIssuerUri() {
         return issuerUri;
     }
@@ -230,6 +264,10 @@ public final class OidcAuthPluginConfig {
     
     public String getTokenValidationMethod() {
         return tokenValidationMethod;
+    }
+    
+    public String getConsoleTokenSource() {
+        return consoleTokenSource;
     }
     
     public long getJwksCacheTtlSeconds() {
@@ -274,12 +312,13 @@ public final class OidcAuthPluginConfig {
      * @return configuration map
      */
     public Map<String, String> toMap() {
-        Map<String, String> result = new LinkedHashMap<>(14);
+        Map<String, String> result = new LinkedHashMap<>(15);
         result.put(ISSUER_URI, issuerUri);
         result.put(CLIENT_ID, clientId);
         result.put(CLIENT_SECRET, clientSecret);
         result.put(SCOPE, scope);
         result.put(TOKEN_VALIDATION_METHOD, tokenValidationMethod);
+        result.put(CONSOLE_TOKEN_SOURCE, consoleTokenSource);
         result.put(JWKS_CACHE_TTL_SECONDS, Long.toString(jwksCacheTtlSeconds));
         result.put(USERNAME_CLAIM, usernameClaim);
         result.put(ROLES_CLAIM, rolesClaim);

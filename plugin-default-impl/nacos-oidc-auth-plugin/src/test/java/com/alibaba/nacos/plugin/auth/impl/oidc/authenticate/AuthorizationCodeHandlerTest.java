@@ -209,6 +209,33 @@ class AuthorizationCodeHandlerTest {
     }
     
     @Test
+    void testExchangeCodeUsesIdTokenForConsoleWithOpaqueAccessToken() throws Exception {
+        String idToken = plainJwt();
+        HttpServer server = startTokenServer(200,
+            tokenSuccessBody(idToken, "opaque-access-token"));
+        try {
+            JwtTokenValidator validator = mock(JwtTokenValidator.class);
+            OidcUserMapper mapper = mock(OidcUserMapper.class);
+            JWTClaimsSet claims = new JWTClaimsSet.Builder().subject("subject")
+                .claim("nonce", "nonce").build();
+            OidcUser user = new OidcUser();
+            user.setUsername("nacos");
+            when(validator.validate(idToken)).thenReturn(claims);
+            when(mapper.mapToUser(claims)).thenReturn(user);
+            AuthorizationCodeHandler handler = tokenHandler(server, true,
+                OidcAuthPluginConfig.CONSOLE_TOKEN_SOURCE_ID_TOKEN, validator, mapper);
+            String state = ReflectionTestUtils.invokeMethod(handler, "buildSignedState", "nonce",
+                System.currentTimeMillis() + 60_000L);
+            
+            OidcUser result = handler.exchangeCodeForUser("code", state, "http://nacos/callback");
+            
+            assertEquals(idToken, result.getToken());
+        } finally {
+            server.stop(0);
+        }
+    }
+    
+    @Test
     void testExchangeCodeHandlesNonceValidationBranches() throws Exception {
         String idToken = plainJwt();
         JWTClaimsSet claimsWithoutNonce = new JWTClaimsSet.Builder().subject("subject").build();
@@ -331,12 +358,20 @@ class AuthorizationCodeHandlerTest {
     
     private AuthorizationCodeHandler tokenHandler(HttpServer server, boolean strictNonce,
         JwtTokenValidator validator, OidcUserMapper mapper) throws Exception {
+        return tokenHandler(server, strictNonce,
+            OidcAuthPluginConfig.DEFAULT_CONSOLE_TOKEN_SOURCE, validator, mapper);
+    }
+    
+    private AuthorizationCodeHandler tokenHandler(HttpServer server, boolean strictNonce,
+        String consoleTokenSource, JwtTokenValidator validator, OidcUserMapper mapper)
+        throws Exception {
         Map<String, String> values = new LinkedHashMap<>();
         values.put(OidcAuthPluginConfig.CLIENT_ID, "client");
         values.put(OidcAuthPluginConfig.CLIENT_SECRET, "secret");
         values.put(OidcAuthPluginConfig.SCOPE, "openid profile");
         values.put(OidcAuthPluginConfig.STRICT_NONCE_VALIDATION,
             Boolean.toString(strictNonce));
+        values.put(OidcAuthPluginConfig.CONSOLE_TOKEN_SOURCE, consoleTokenSource);
         OidcAuthPluginConfig config = OidcAuthPluginConfig.from(values);
         String tokenEndpoint = "http://127.0.0.1:" + server.getAddress().getPort() + "/token";
         return newHandler(config, metadataProvider("http://idp/authorize", tokenEndpoint,
@@ -365,7 +400,12 @@ class AuthorizationCodeHandlerTest {
     }
     
     private String tokenSuccessBody(String idToken) {
-        return "{\"access_token\":\"access-token\",\"token_type\":\"Bearer\",\"id_token\":\""
+        return tokenSuccessBody(idToken, "access-token");
+    }
+    
+    private String tokenSuccessBody(String idToken, String accessToken) {
+        return "{\"access_token\":\"" + accessToken
+            + "\",\"token_type\":\"Bearer\",\"id_token\":\""
             + idToken + "\"}";
     }
     

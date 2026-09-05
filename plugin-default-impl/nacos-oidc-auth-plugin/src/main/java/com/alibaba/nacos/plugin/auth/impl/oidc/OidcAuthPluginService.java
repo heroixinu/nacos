@@ -84,6 +84,14 @@ public class OidcAuthPluginService implements AuthPluginService, PluginConfigSpe
             ConfigItemType.STRING, OidcAuthPluginConfig.DEFAULT_TOKEN_VALIDATION_METHOD,
             "Declared token validation mode; the current implementation supports jwt only",
             OidcConstants.CONFIG_TOKEN_VALIDATION_METHOD);
+        ConfigItemDefinition consoleTokenSource = restartDefinition(
+            OidcAuthPluginConfig.CONSOLE_TOKEN_SOURCE, "Console token source",
+            ConfigItemType.ENUM, OidcAuthPluginConfig.DEFAULT_CONSOLE_TOKEN_SOURCE,
+            "OIDC token response field reused as the Nacos Console bearer credential",
+            OidcConstants.CONFIG_CONSOLE_TOKEN_SOURCE);
+        consoleTokenSource.setEnumValues(Arrays.asList(
+            OidcAuthPluginConfig.CONSOLE_TOKEN_SOURCE_ACCESS_TOKEN,
+            OidcAuthPluginConfig.CONSOLE_TOKEN_SOURCE_ID_TOKEN));
         ConfigItemDefinition jwksCacheTtl = restartDefinition(
             OidcAuthPluginConfig.JWKS_CACHE_TTL_SECONDS, "JWKS cache TTL",
             ConfigItemType.NUMBER,
@@ -126,12 +134,12 @@ public class OidcAuthPluginService implements AuthPluginService, PluginConfigSpe
             OidcAuthPluginConfig.STRICT_AUDIENCE_VALIDATION, "Strict audience validation",
             ConfigItemType.BOOLEAN,
             Boolean.toString(OidcAuthPluginConfig.DEFAULT_STRICT_AUDIENCE_VALIDATION),
-            "Reject tokens whose audience and authorized party do not match the client ID",
+            "Reject tokens with missing or mismatched audience for the configured client ID",
             OidcConstants.CONFIG_STRICT_AUDIENCE_VALIDATION);
         return Collections.unmodifiableList(Arrays.asList(issuerUri, clientId, clientSecret,
-            scope, tokenValidationMethod, jwksCacheTtl, usernameClaim, rolesClaim, adminRole,
-            autoCreateUser, authorizationEndpoint, authorizationTimeout, strictNonce,
-            strictAudience));
+            scope, tokenValidationMethod, consoleTokenSource, jwksCacheTtl, usernameClaim,
+            rolesClaim, adminRole, autoCreateUser, authorizationEndpoint, authorizationTimeout,
+            strictNonce, strictAudience));
     }
     
     private static ConfigItemDefinition restartDefinition(String key, String name,

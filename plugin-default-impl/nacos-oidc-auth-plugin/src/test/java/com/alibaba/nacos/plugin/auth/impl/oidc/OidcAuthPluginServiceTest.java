@@ -18,6 +18,7 @@ package com.alibaba.nacos.plugin.auth.impl.oidc;
 
 import com.alibaba.nacos.api.plugin.ConfigItemDefinition;
 import com.alibaba.nacos.api.plugin.ConfigItemEffectMode;
+import com.alibaba.nacos.api.plugin.ConfigItemType;
 import com.alibaba.nacos.plugin.auth.api.AuthResult;
 import com.alibaba.nacos.plugin.auth.api.IdentityContext;
 import com.alibaba.nacos.plugin.auth.api.Permission;
@@ -64,7 +65,7 @@ class OidcAuthPluginServiceTest {
         OidcAuthPluginService service = new OidcAuthPluginService();
         List<ConfigItemDefinition> definitions = service.getConfigDefinitions();
         
-        assertEquals(14, definitions.size());
+        assertEquals(15, definitions.size());
         for (ConfigItemDefinition definition : definitions) {
             assertEquals(ConfigItemEffectMode.RESTART, definition.getEffectMode());
             assertEquals(1, definition.getAliases().size());
@@ -74,6 +75,18 @@ class OidcAuthPluginServiceTest {
         ConfigItemDefinition secret = definition(definitions, OidcAuthPluginConfig.CLIENT_SECRET);
         assertTrue(secret.isSensitive());
         assertFalse(definition(definitions, OidcAuthPluginConfig.CLIENT_ID).isSensitive());
+        ConfigItemDefinition consoleTokenSource = definition(definitions,
+            OidcAuthPluginConfig.CONSOLE_TOKEN_SOURCE);
+        assertEquals(ConfigItemType.ENUM, consoleTokenSource.getType());
+        assertEquals(OidcAuthPluginConfig.DEFAULT_CONSOLE_TOKEN_SOURCE,
+            consoleTokenSource.getDefaultValue());
+        assertEquals(OidcConstants.CONFIG_CONSOLE_TOKEN_SOURCE,
+            consoleTokenSource.getAliases().get(0));
+        assertEquals(2, consoleTokenSource.getEnumValues().size());
+        assertTrue(consoleTokenSource.getEnumValues()
+            .contains(OidcAuthPluginConfig.CONSOLE_TOKEN_SOURCE_ACCESS_TOKEN));
+        assertTrue(consoleTokenSource.getEnumValues()
+            .contains(OidcAuthPluginConfig.CONSOLE_TOKEN_SOURCE_ID_TOKEN));
     }
     
     @Test
@@ -84,11 +97,14 @@ class OidcAuthPluginServiceTest {
         config.put(OidcAuthPluginConfig.CLIENT_ID, "client");
         config.put(OidcAuthPluginConfig.CLIENT_SECRET, "secret");
         config.put(OidcAuthPluginConfig.AUTHORIZATION_TIMEOUT_MS, "1234");
+        config.put(OidcAuthPluginConfig.CONSOLE_TOKEN_SOURCE,
+            OidcAuthPluginConfig.CONSOLE_TOKEN_SOURCE_ID_TOKEN);
         
         service.applyConfig(config);
         
         assertTrue(service.isConfigurationValid());
         assertEquals("client", service.getConfig().getClientId());
+        assertTrue(service.getConfig().isIdTokenConsoleTokenSource());
         assertEquals("secret", service.getCurrentConfig()
             .get(OidcAuthPluginConfig.CLIENT_SECRET));
         assertEquals("1234", service.getCurrentConfig()

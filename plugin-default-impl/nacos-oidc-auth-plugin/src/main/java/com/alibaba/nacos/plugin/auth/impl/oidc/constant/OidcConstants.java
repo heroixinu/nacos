@@ -95,6 +95,15 @@ public final class OidcConstants {
         CONFIG_PREFIX + "token-validation-method";
     
     /**
+     * Legacy console token source key.
+     *
+     * @deprecated Use {@code nacos.plugin.auth.oidc.console-token-source} instead. Planned for
+     *     removal in Nacos 4.0.0.
+     */
+    @Deprecated
+    public static final String CONFIG_CONSOLE_TOKEN_SOURCE = CONFIG_PREFIX + "console-token-source";
+    
+    /**
      * Legacy JWKS cache TTL key.
      *
      * @deprecated Use {@code nacos.plugin.auth.oidc.jwks-cache-ttl-seconds} instead. Planned for

@@ -28,6 +28,7 @@ import com.nimbusds.jose.proc.JWSKeySelector;
 import com.nimbusds.jose.proc.JWSVerificationKeySelector;
 import com.nimbusds.jose.proc.SecurityContext;
 import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.proc.BadJWTException;
 import com.nimbusds.jwt.proc.ConfigurableJWTProcessor;
 import com.nimbusds.jwt.proc.DefaultJWTClaimsVerifier;
 import com.nimbusds.jwt.proc.DefaultJWTProcessor;
@@ -106,9 +107,12 @@ public class JwtTokenValidator {
         } catch (ParseException e) {
             LOGGER.warn("Failed to parse JWT token: {}", e.getMessage());
             throw new AccessException("Invalid token format");
+        } catch (BadJWTException e) {
+            LOGGER.warn("JWT claims validation failed: {}", e.getMessage());
+            throw new AccessException("Token claims validation failed");
         } catch (BadJOSEException e) {
-            LOGGER.warn("JWT signature verification failed: {}", e.getMessage());
-            // Try refreshing JWKS and retry once (key rotation scenario)
+            LOGGER.warn("JWT JOSE verification failed: {}", e.getMessage());
+            // Refresh keys only for JOSE verification failures, not claims validation failures.
             return retryWithRefreshedJwks(token, e);
         } catch (JOSEException e) {
             LOGGER.warn("JWT processing error: {}", e.getMessage());
@@ -149,12 +153,10 @@ public class JwtTokenValidator {
             new ImmutableJWKSet<>(jwkSet));
         processor.setJWSKeySelector(keySelector);
         
-        // Configure claims verifier
+        // Nimbus verifies required/time claims here. Issuer comparison is performed below so
+        // the plugin's documented trailing-slash normalization is applied consistently.
         processor.setJWTClaimsSetVerifier(new DefaultJWTClaimsVerifier<>(
-            new JWTClaimsSet.Builder()
-                .issuer(config.getIssuerUri())
-                .build(),
-            REQUIRED_CLAIMS));
+            new JWTClaimsSet.Builder().build(), REQUIRED_CLAIMS));
         
         return processor;
     }
@@ -169,7 +171,8 @@ public class JwtTokenValidator {
      */
     private JWTClaimsSet retryWithRefreshedJwks(String token, Exception originalException)
         throws AccessException {
-        LOGGER.info("Retrying token validation with refreshed JWKS");
+        LOGGER.info("Retrying token validation with refreshed JWKS after JOSE verification "
+            + "failure: {}", originalException.getMessage());
         
         try {
             // Refresh JWKS
@@ -187,8 +190,17 @@ public class JwtTokenValidator {
             LOGGER.info("Token validated successfully after JWKS refresh");
             return claims;
             
+        } catch (BadJWTException e) {
+            LOGGER.warn("JWT claims validation failed after JWKS refresh: {}", e.getMessage());
+            throw new AccessException("Token claims validation failed");
+        } catch (ParseException e) {
+            LOGGER.warn("Failed to parse JWT token after JWKS refresh: {}", e.getMessage());
+            throw new AccessException("Invalid token format");
+        } catch (AccessException e) {
+            throw e;
         } catch (Exception e) {
-            LOGGER.warn("Token validation failed even after JWKS refresh: {}", e.getMessage());
+            LOGGER.warn("Token JOSE verification failed even after JWKS refresh: {}",
+                e.getMessage());
             throw new AccessException("Token signature verification failed");
         }
     }
@@ -212,47 +224,57 @@ public class JwtTokenValidator {
             throw new AccessException("Token is not yet valid");
         }
         
-        // Validate audience (if client ID is configured)
+        validateAudience(claims);
+        validateIssuer(claims);
+    }
+    
+    private void validateAudience(JWTClaimsSet claims) throws AccessException {
         String clientId = config.getClientId();
-        if (StringUtils.isNotBlank(clientId)) {
-            List<String> audience = claims.getAudience();
-            if (audience != null && !audience.isEmpty() && !audience.contains(clientId)) {
-                // Check if 'azp' (authorized party) matches
-                String azp = (String) claims.getClaim("azp");
-                if (!clientId.equals(azp)) {
-                    String message = String.format(
-                        "Token audience mismatch. Expected: %s, Got: %s, azp: %s",
-                        clientId, audience, azp);
-                    
-                    if (config.isStrictAudienceValidation()) {
-                        LOGGER.error("{} - Strict validation enabled, rejecting token. "
-                            + "This token may be intended for a different client.", message);
-                        throw new AccessException("Token audience validation failed");
-                    } else {
-                        LOGGER.warn("{} - Strict validation disabled, accepting token. "
-                            + "Set 'nacos.plugin.auth.oidc.strict-audience-validation=true' for better security.",
-                            message);
-                    }
-                }
-            }
+        if (StringUtils.isBlank(clientId)) {
+            return;
         }
         
-        // Validate issuer
-        String issuer = claims.getIssuer();
-        String expectedIssuer = config.getIssuerUri();
-        if (StringUtils.isNotBlank(expectedIssuer) && !expectedIssuer.equals(issuer)) {
-            // Handle trailing slash difference
-            String normalizedExpected = expectedIssuer.endsWith("/")
-                ? expectedIssuer.substring(0, expectedIssuer.length() - 1)
-                : expectedIssuer;
-            String normalizedIssuer = issuer != null && issuer.endsWith("/")
-                ? issuer.substring(0, issuer.length() - 1)
-                : issuer;
-            
-            if (!normalizedExpected.equals(normalizedIssuer)) {
-                throw new AccessException("Token issuer mismatch");
-            }
+        List<String> audience = claims.getAudience();
+        if (audience == null || audience.isEmpty()) {
+            handleAudienceValidationFailure(String.format(
+                "Token audience is missing. Expected client ID: %s", clientId));
+            return;
         }
+        if (!audience.contains(clientId)) {
+            String azp = (String) claims.getClaim("azp");
+            handleAudienceValidationFailure(String.format(
+                "Token audience mismatch. Expected: %s, Got: %s, azp: %s",
+                clientId, audience, azp));
+        }
+    }
+    
+    private void handleAudienceValidationFailure(String message) throws AccessException {
+        if (config.isStrictAudienceValidation()) {
+            LOGGER.error("{} - Strict validation enabled, rejecting token. "
+                + "This token may be intended for a different client.", message);
+            throw new AccessException("Token audience validation failed");
+        }
+        LOGGER.warn("{} - Strict validation disabled, accepting token. "
+            + "Set 'nacos.plugin.auth.oidc.strict-audience-validation=true' for better security.",
+            message);
+    }
+    
+    private void validateIssuer(JWTClaimsSet claims) throws AccessException {
+        String expectedIssuer = config.getIssuerUri();
+        if (StringUtils.isBlank(expectedIssuer)) {
+            return;
+        }
+        String issuer = claims.getIssuer();
+        if (!normalizeIssuer(expectedIssuer).equals(normalizeIssuer(issuer))) {
+            throw new AccessException("Token issuer mismatch");
+        }
+    }
+    
+    private String normalizeIssuer(String issuer) {
+        if (issuer == null || !issuer.endsWith("/")) {
+            return issuer;
+        }
+        return issuer.substring(0, issuer.length() - 1);
     }
     
     /**

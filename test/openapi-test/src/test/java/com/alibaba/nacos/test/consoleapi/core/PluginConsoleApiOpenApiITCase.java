@@ -167,7 +167,7 @@ public class PluginConsoleApiOpenApiITCase extends CoreConsoleApiBaseITCase {
         assertTrue(detail.get("configurable").asBoolean(), detail.toString());
 
         JsonNode definitions = detail.get("configDefinitions");
-        assertEquals(14, definitions.size(), definitions.toString());
+        assertEquals(15, definitions.size(), definitions.toString());
         assertDefinition(definitions, "issuer-uri", "nacos.core.auth.plugin.oidc.issuer-uri",
                 "STRING", "RESTART", false);
         assertDefinition(definitions, "client-id", "nacos.core.auth.plugin.oidc.client-id",
@@ -178,6 +178,8 @@ public class PluginConsoleApiOpenApiITCase extends CoreConsoleApiBaseITCase {
                 "STRING", "RESTART", false);
         assertDefinition(definitions, "token-validation-method",
                 "nacos.core.auth.plugin.oidc.token-validation-method", "STRING", "RESTART", false);
+        assertDefinition(definitions, "console-token-source",
+                "nacos.core.auth.plugin.oidc.console-token-source", "ENUM", "RESTART", false);
         assertDefinition(definitions, "jwks-cache-ttl-seconds",
                 "nacos.core.auth.plugin.oidc.jwks-cache-ttl-seconds", "NUMBER", "RESTART", false);
         assertDefinition(definitions, "username-claim", "nacos.core.auth.plugin.oidc.username-claim",
@@ -198,17 +200,18 @@ public class PluginConsoleApiOpenApiITCase extends CoreConsoleApiBaseITCase {
                 "nacos.core.auth.plugin.oidc.strict-audience-validation", "BOOLEAN", "RESTART", false);
 
         JsonNode config = detail.get("config");
-        assertEquals(14, config.size(), config.toString());
+        assertEquals(15, config.size(), config.toString());
         assertEquals("", config.get("issuer-uri").asText(), config.toString());
         assertEquals("", config.get("client-secret").asText(), config.toString());
         assertEquals("openid profile email", config.get("scope").asText(), config.toString());
         assertEquals("jwt", config.get("token-validation-method").asText(), config.toString());
+        assertEquals("access_token", config.get("console-token-source").asText(), config.toString());
         assertEquals("3600", config.get("jwks-cache-ttl-seconds").asText(), config.toString());
         assertEquals("5000", config.get("authorization-timeout-ms").asText(), config.toString());
         assertEquals("true", config.get("strict-audience-validation").asText(), config.toString());
 
         JsonNode metas = detail.get("configValueMetas");
-        assertEquals(14, metas.size(), metas.toString());
+        assertEquals(15, metas.size(), metas.toString());
         for (JsonNode meta : metas) {
             assertEquals("DEFAULT", meta.get("source").asText(), meta.toString());
         }

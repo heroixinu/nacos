@@ -68,6 +68,7 @@ OIDC 插件配置使用标准 full key 前缀 `nacos.plugin.auth.oidc.` 下的 i
 | `client-secret` | string | 空 | 是 | 重启 | OAuth2 client secret，同时用于签名 state。 |
 | `scope` | string | `openid profile email` | 否 | 重启 | 浏览器登录时请求的 scope。 |
 | `token-validation-method` | string | `jwt` | 否 | 重启 | 预留的校验模式选择项；当前服务端仅支持 JWT/JWKS。 |
+| `console-token-source` | enum | `access_token` | 否 | 重启 | 选择 OIDC token response 中哪个字段作为 Nacos Console 后续 bearer 凭证，可选 `access_token` 或 `id_token`。 |
 | `jwks-cache-ttl-seconds` | number | `3600` | 否 | 重启 | 正数，单位为秒的 JWKS 缓存 TTL。 |
 | `username-claim` | string | `preferred_username` | 否 | 重启 | 作为 Nacos 展示用户名的 claim。 |
 | `roles-claim` | string | `roles` | 否 | 重启 | 提取角色时优先使用的 claim。 |
@@ -76,14 +77,20 @@ OIDC 插件配置使用标准 full key 前缀 `nacos.plugin.auth.oidc.` 下的 i
 | `authorization-endpoint` | string | 空 | 否 | 重启 | 用于非管理员授权决策的外部端点。 |
 | `authorization-timeout-ms` | number | `5000` | 否 | 重启 | 外部授权请求的正数毫秒超时。 |
 | `strict-nonce-validation` | boolean | `true` | 否 | 重启 | 当 ID token 缺少或不匹配 nonce 时拒绝 authorization-code 登录。 |
-| `strict-audience-validation` | boolean | `true` | 否 | 重启 | 当 token audience 或 authorized party 与 `client-id` 不匹配时拒绝 token。 |
+| `strict-audience-validation` | boolean | `true` | 否 | 重启 | 当 token 缺少 audience，或 audience 无法识别 `client-id` 时拒绝 token。 |
 
 `issuer-uri` 和 `client-id` 是有效服务端配置的必要条件。浏览器登录还需要 `client-secret`、
 authorization endpoint discovery 和 token endpoint discovery。
 
+`console-token-source=access_token` 保持历史行为不变。如果身份提供方返回 opaque OAuth
+`access_token`，但同时返回可通过 JWKS 校验的 JWT `id_token`，可以设置
+`console-token-source=id_token`。此时 `id_token` 仍会先完成签名和 claims 校验，再被复用为
+Console bearer 凭证。由于外部授权契约要求 OAuth access token，而当前 Console 鉴权流程是
+无状态的，因此 `console-token-source=id_token` 不能与非空 `authorization-endpoint` 同时使用。
+
 ## 统一插件配置生命周期
 
-`OidcAuthPluginService` 实现 `PluginConfigSpec`，并通过插件 detail API 暴露全部 14 项定义。
+`OidcAuthPluginService` 实现 `PluginConfigSpec`，并通过插件 detail API 暴露全部 15 项定义。
 API 必须对 `client-secret` 脱敏，任何查询响应都不得返回有效明文。
 
 当前生命周期中全部配置均为重启生效。会改变 OIDC 字段的 runtime-persisted 或 local-only API
@@ -116,6 +123,8 @@ false，因为统一管理器也会初始化未被选择的已发现鉴权插件
 - 生成自包含签名的 `state` 和 `nonce`。
 - 在 IdP token endpoint 交换 authorization code。
 - 接受用户前校验 ID token 签名和 claims。
+- 根据 `console-token-source` 从 `access_token` 或已完成校验的 `id_token` 中选择后续
+  Console bearer 凭证。
 - 只把短期 console cookie 作为前端交接机制，随后依赖正常请求身份传播。
 
 ## Token 校验
@@ -126,8 +135,10 @@ false，因为统一管理器也会初始化未被选择的已发现鉴权插件
 - 要求 `sub`、`iss`、`exp` 和 `iat` claims。
 - 拒绝已过期或尚未生效的 token。
 - 校验 issuer，并兼容尾部斜杠差异。
-- 启用 strict audience validation 时，校验 audience 或 `azp` 与 `client-id` 匹配。
-- 当签名校验失败时刷新 JWKS 并重试一次，以兼容 key rotation。
+- 启用 strict audience validation 时，`aud` 必须包含 `client-id`；即使 `azp` 匹配，
+  也不能替代不匹配的 audience。
+- 只有可能由 key rotation 引起的 JOSE verification failure 才刷新 JWKS 并重试一次；
+  claims validation failure 不得触发 JWKS 刷新。
 
 用户名映射优先使用配置的 `username-claim`，随后回退到 `preferred_username`、`email`，
 最后使用 `sub`。角色映射优先使用配置的 `roles-claim`，也可以读取常见 Keycloak 风格的
@@ -150,7 +161,9 @@ Nacos 资源执行目标动作。
 | `resourceType`, `namespace`, `group`, `resourceName` | 结构化的 Nacos 资源身份。 |
 
 如果 `authorization-endpoint` 为空，当前实现会允许非管理员访问。需要授权隔离的部署必须
-配置外部 authorization endpoint，或提供更严格的 OIDC authority provider。
+配置外部 authorization endpoint，或提供更严格的 OIDC authority provider。由于该授权契约
+明确使用 OAuth access token，因此配置模型会拒绝同时设置
+`console-token-source=id_token` 和外部 authorization endpoint。
 
 ## Java 客户端集成
 

@@ -18,9 +18,9 @@ package com.alibaba.nacos.plugin.auth.impl.oidc.token;
 
 import com.alibaba.nacos.plugin.auth.exception.AccessException;
 import com.alibaba.nacos.plugin.auth.impl.oidc.config.OidcAuthPluginConfig;
+import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.JWSHeader;
-import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.crypto.RSASSASigner;
 import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.RSAKey;
@@ -29,6 +29,7 @@ import com.nimbusds.jose.proc.BadJOSEException;
 import com.nimbusds.jose.proc.SecurityContext;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
+import com.nimbusds.jwt.proc.BadJWTException;
 import com.nimbusds.jwt.proc.ConfigurableJWTProcessor;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -48,6 +49,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class JwtTokenValidatorTest {
@@ -117,15 +120,50 @@ class JwtTokenValidatorTest {
     }
     
     @Test
-    void testValidateRejectsStrictAudienceMismatch() throws Exception {
+    void testRealProcessorAcceptsIssuerTrailingSlashDifference() throws Exception {
+        OidcAuthPluginConfig config = mockConfig();
+        when(config.getIssuerUri()).thenReturn("http://issuer/");
+        when(config.isStrictAudienceValidation()).thenReturn(true);
+        RSAKey key = new RSAKeyGenerator(2048).keyID("issuer-key").generate();
+        JwksProvider provider = mock(JwksProvider.class);
+        when(provider.getJwkSet()).thenReturn(new JWKSet(key.toPublicJWK()));
+        JwtTokenValidator validator = new JwtTokenValidator(config, provider);
+        SignedJWT signedJwt = signedJwt(key, validClaims().issuer("http://issuer").build());
+        
+        JWTClaimsSet claims = validator.validate(signedJwt.serialize());
+        
+        assertEquals("subject", claims.getSubject());
+    }
+    
+    @Test
+    void testValidateRejectsStrictAudienceMismatchAndMissingAudience() throws Exception {
         OidcAuthPluginConfig config = mockConfig();
         when(config.isStrictAudienceValidation()).thenReturn(true);
         JwtTokenValidator validator = newValidator(config);
         ConfigurableJWTProcessor<SecurityContext> processor = mockProcessor();
         ReflectionTestUtils.setField(validator, "jwtProcessor", processor);
-        when(processor.process("token", null)).thenReturn(validClaims().audience("other").build());
+        when(processor.process("mismatch", null)).thenReturn(validClaims()
+            .audience("other").build());
+        when(processor.process("azp-only", null)).thenReturn(validClaims()
+            .audience("other").claim("azp", "nacos").build());
+        when(processor.process("missing", null)).thenReturn(validClaimsWithoutAudience().build());
         
-        assertThrows(AccessException.class, () -> validator.validate("token"));
+        assertThrows(AccessException.class, () -> validator.validate("mismatch"));
+        assertThrows(AccessException.class, () -> validator.validate("azp-only"));
+        assertThrows(AccessException.class, () -> validator.validate("missing"));
+    }
+    
+    @Test
+    void testValidateAllowsMissingAudienceWhenStrictValidationDisabled() throws Exception {
+        OidcAuthPluginConfig config = mockConfig();
+        when(config.isStrictAudienceValidation()).thenReturn(false);
+        JwtTokenValidator validator = newValidator(config);
+        ConfigurableJWTProcessor<SecurityContext> processor = mockProcessor();
+        ReflectionTestUtils.setField(validator, "jwtProcessor", processor);
+        JWTClaimsSet claims = validClaimsWithoutAudience().build();
+        when(processor.process("missing", null)).thenReturn(claims);
+        
+        assertEquals(claims, validator.validate("missing"));
     }
     
     @Test
@@ -143,6 +181,20 @@ class JwtTokenValidatorTest {
         assertThrows(AccessException.class, () -> validator.validate("jose"));
         assertThrows(AccessException.class, () -> validator.validate("argument"));
         assertThrows(AccessException.class, () -> validator.validate("runtime"));
+    }
+    
+    @Test
+    void testBadJwtClaimsFailureDoesNotRefreshJwks() throws Exception {
+        OidcAuthPluginConfig config = mockConfig();
+        JwksProvider provider = mock(JwksProvider.class);
+        JwtTokenValidator validator = new JwtTokenValidator(config, provider);
+        ConfigurableJWTProcessor<SecurityContext> processor = mockProcessor();
+        ReflectionTestUtils.setField(validator, "jwtProcessor", processor);
+        when(processor.process("claims-error", null))
+            .thenThrow(new BadJWTException("claims invalid"));
+        
+        assertThrows(AccessException.class, () -> validator.validate("claims-error"));
+        verify(provider, never()).refreshJwkSet();
     }
     
     @Test
@@ -172,9 +224,7 @@ class JwtTokenValidatorTest {
         ReflectionTestUtils.setField(validator, "jwtProcessor", processor);
         ReflectionTestUtils.setField(validator, "jwksProvider", provider);
         RSAKey key = new RSAKeyGenerator(2048).keyID("rotated-key").generate();
-        SignedJWT signedJwt = new SignedJWT(new JWSHeader.Builder(JWSAlgorithm.RS256)
-            .keyID(key.getKeyID()).build(), validClaims().build());
-        signedJwt.sign(new RSASSASigner(key));
+        SignedJWT signedJwt = signedJwt(key, validClaims().build());
         String token = signedJwt.serialize();
         when(processor.process(token, null)).thenThrow(new BadJOSEException("bad key"));
         when(provider.refreshJwkSet()).thenReturn(new JWKSet(key.toPublicJWK()));
@@ -297,12 +347,22 @@ class JwtTokenValidatorTest {
     }
     
     private JWTClaimsSet.Builder validClaims() {
+        return validClaimsWithoutAudience().audience("nacos");
+    }
+    
+    private JWTClaimsSet.Builder validClaimsWithoutAudience() {
         return new JWTClaimsSet.Builder()
             .subject("subject")
             .issuer("http://issuer")
             .expirationTime(new Date(System.currentTimeMillis() + 60_000L))
-            .issueTime(new Date(System.currentTimeMillis() - 1_000L))
-            .audience("nacos");
+            .issueTime(new Date(System.currentTimeMillis() - 1_000L));
+    }
+    
+    private SignedJWT signedJwt(RSAKey key, JWTClaimsSet claims) throws JOSEException {
+        SignedJWT signedJwt = new SignedJWT(new JWSHeader.Builder(JWSAlgorithm.RS256)
+            .keyID(key.getKeyID()).build(), claims);
+        signedJwt.sign(new RSASSASigner(key));
+        return signedJwt;
     }
     
     private JwtTokenValidator newValidator(OidcAuthPluginConfig config) {

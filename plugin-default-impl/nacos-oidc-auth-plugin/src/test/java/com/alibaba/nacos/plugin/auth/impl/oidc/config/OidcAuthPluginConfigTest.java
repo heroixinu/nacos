@@ -35,12 +35,15 @@ class OidcAuthPluginConfigTest {
         assertFalse(config.isValid());
         assertTrue(config.isJwtValidation());
         assertFalse(config.isIntrospectionValidation());
+        assertFalse(config.isIdTokenConsoleTokenSource());
         assertEquals("", config.getIssuerUri());
         assertEquals("", config.getClientId());
         assertEquals("", config.getClientSecret());
         assertEquals(OidcAuthPluginConfig.DEFAULT_SCOPE, config.getScope());
         assertEquals(OidcAuthPluginConfig.DEFAULT_TOKEN_VALIDATION_METHOD,
             config.getTokenValidationMethod());
+        assertEquals(OidcAuthPluginConfig.DEFAULT_CONSOLE_TOKEN_SOURCE,
+            config.getConsoleTokenSource());
         assertEquals(OidcAuthPluginConfig.DEFAULT_JWKS_CACHE_TTL_SECONDS,
             config.getJwksCacheTtlSeconds());
         assertEquals(OidcAuthPluginConfig.DEFAULT_USERNAME_CLAIM, config.getUsernameClaim());
@@ -52,7 +55,7 @@ class OidcAuthPluginConfigTest {
             config.getAuthorizationTimeoutMs());
         assertTrue(config.isStrictNonceValidation());
         assertTrue(config.isStrictAudienceValidation());
-        assertEquals(14, config.toMap().size());
+        assertEquals(15, config.toMap().size());
     }
     
     @Test
@@ -64,10 +67,13 @@ class OidcAuthPluginConfigTest {
         assertTrue(config.isValid());
         assertFalse(config.isJwtValidation());
         assertTrue(config.isIntrospectionValidation());
+        assertFalse(config.isIdTokenConsoleTokenSource());
         assertEquals("http://issuer", config.getIssuerUri());
         assertEquals("client", config.getClientId());
         assertEquals("secret", config.getClientSecret());
         assertEquals("openid", config.getScope());
+        assertEquals(OidcAuthPluginConfig.CONSOLE_TOKEN_SOURCE_ACCESS_TOKEN,
+            config.getConsoleTokenSource());
         assertEquals(12L, config.getJwksCacheTtlSeconds());
         assertEquals("email", config.getUsernameClaim());
         assertEquals("groups", config.getRolesClaim());
@@ -81,19 +87,37 @@ class OidcAuthPluginConfigTest {
     }
     
     @Test
+    void testConsoleTokenSourceSupportsIdTokenAndRejectsUnsafeCombination() {
+        Map<String, String> values = new LinkedHashMap<>();
+        values.put(OidcAuthPluginConfig.CONSOLE_TOKEN_SOURCE, "ID_TOKEN");
+        OidcAuthPluginConfig config = OidcAuthPluginConfig.from(values);
+        
+        assertTrue(config.isIdTokenConsoleTokenSource());
+        assertEquals(OidcAuthPluginConfig.CONSOLE_TOKEN_SOURCE_ID_TOKEN,
+            config.getConsoleTokenSource());
+        
+        values.put(OidcAuthPluginConfig.AUTHORIZATION_ENDPOINT, "http://idp/authz");
+        assertThrows(IllegalArgumentException.class,
+            () -> OidcAuthPluginConfig.from(values));
+    }
+    
+    @Test
     void testBlankValuesUseDefaults() {
         Map<String, String> values = new LinkedHashMap<>();
         values.put(OidcAuthPluginConfig.SCOPE, "  ");
         values.put(OidcAuthPluginConfig.CLIENT_ID, "");
+        values.put(OidcAuthPluginConfig.CONSOLE_TOKEN_SOURCE, " ");
         
         OidcAuthPluginConfig config = OidcAuthPluginConfig.from(values);
         
         assertEquals(OidcAuthPluginConfig.DEFAULT_SCOPE, config.getScope());
         assertEquals("", config.getClientId());
+        assertEquals(OidcAuthPluginConfig.DEFAULT_CONSOLE_TOKEN_SOURCE,
+            config.getConsoleTokenSource());
     }
     
     @Test
-    void testRejectsNullInvalidNumbersAndInvalidBooleans() {
+    void testRejectsNullInvalidNumbersBooleansAndTokenSource() {
         assertInvalid(OidcAuthPluginConfig.CLIENT_ID, null);
         assertInvalid(OidcAuthPluginConfig.JWKS_CACHE_TTL_SECONDS, "not-number");
         assertInvalid(OidcAuthPluginConfig.JWKS_CACHE_TTL_SECONDS, "0");
@@ -101,6 +125,7 @@ class OidcAuthPluginConfigTest {
         assertInvalid(OidcAuthPluginConfig.AUTO_CREATE_USER, "yes");
         assertInvalid(OidcAuthPluginConfig.STRICT_NONCE_VALIDATION, "enabled");
         assertInvalid(OidcAuthPluginConfig.STRICT_AUDIENCE_VALIDATION, "disabled");
+        assertInvalid(OidcAuthPluginConfig.CONSOLE_TOKEN_SOURCE, "opaque");
     }
     
     private void assertInvalid(String key, String value) {
@@ -117,6 +142,8 @@ class OidcAuthPluginConfigTest {
         values.put(OidcAuthPluginConfig.CLIENT_SECRET, "secret");
         values.put(OidcAuthPluginConfig.SCOPE, "openid");
         values.put(OidcAuthPluginConfig.TOKEN_VALIDATION_METHOD, "introspection");
+        values.put(OidcAuthPluginConfig.CONSOLE_TOKEN_SOURCE,
+            OidcAuthPluginConfig.CONSOLE_TOKEN_SOURCE_ACCESS_TOKEN);
         values.put(OidcAuthPluginConfig.JWKS_CACHE_TTL_SECONDS, "12");
         values.put(OidcAuthPluginConfig.USERNAME_CLAIM, "email");
         values.put(OidcAuthPluginConfig.ROLES_CLAIM, "groups");

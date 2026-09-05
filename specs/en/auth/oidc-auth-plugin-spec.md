@@ -74,6 +74,7 @@ both forms are present, the canonical key wins.
 | `client-secret` | string | empty | yes | restart | OAuth2 client secret, also used for signed state. |
 | `scope` | string | `openid profile email` | no | restart | Scopes requested during browser login. |
 | `token-validation-method` | string | `jwt` | no | restart | Reserved validation mode selector; current server code supports JWT/JWKS only. |
+| `console-token-source` | enum | `access_token` | no | restart | Token response field reused as the Nacos Console bearer credential. Supported values are `access_token` and `id_token`. |
 | `jwks-cache-ttl-seconds` | number | `3600` | no | restart | Positive JWKS cache TTL in seconds. |
 | `username-claim` | string | `preferred_username` | no | restart | Claim used as the Nacos display username. |
 | `roles-claim` | string | `roles` | no | restart | Primary claim used to extract roles. |
@@ -82,15 +83,23 @@ both forms are present, the canonical key wins.
 | `authorization-endpoint` | string | empty | no | restart | External endpoint used for non-admin authorization decisions. |
 | `authorization-timeout-ms` | number | `5000` | no | restart | Positive timeout for external authorization requests. |
 | `strict-nonce-validation` | boolean | `true` | no | restart | Reject authorization-code login when the ID token lacks or mismatches nonce. |
-| `strict-audience-validation` | boolean | `true` | no | restart | Reject tokens whose audience or authorized party does not match `client-id`. |
+| `strict-audience-validation` | boolean | `true` | no | restart | Reject tokens whose audience is missing or does not identify `client-id`. |
 
 `issuer-uri` and `client-id` are required for a valid server configuration.
 Browser login also requires `client-secret`, authorization endpoint discovery,
 and token endpoint discovery.
 
+`console-token-source=access_token` preserves the historical behavior. Providers
+that issue an opaque OAuth access token but a JWT ID token may set
+`console-token-source=id_token`, in which case the ID token is still validated
+before it is reused as the Console bearer credential. Because the external
+authorization contract requires the OAuth access token and the Console flow is
+stateless, `console-token-source=id_token` cannot be combined with a non-empty
+`authorization-endpoint`.
+
 ## Unified Plugin Configuration Lifecycle
 
-`OidcAuthPluginService` implements `PluginConfigSpec` and exposes all fourteen
+`OidcAuthPluginService` implements `PluginConfigSpec` and exposes all fifteen
 items through plugin detail APIs. The APIs must mask `client-secret`; the
 effective value must never be returned in plaintext.
 
@@ -131,6 +140,8 @@ The login flow must:
 - Generate a self-contained signed `state` value and a `nonce`.
 - Exchange the authorization code at the IdP token endpoint.
 - Validate the ID token signature and claims before accepting the user.
+- Select the subsequent Console bearer credential from `access_token` or the
+  already validated `id_token` according to `console-token-source`.
 - Deliver short-lived console cookies only as a handoff mechanism for the
   frontend, then rely on normal request identity propagation.
 
@@ -142,10 +153,10 @@ The current implementation validates JWT tokens with JWKS. Validation must:
 - Require `sub`, `iss`, `exp`, and `iat` claims.
 - Reject expired tokens and tokens that are not yet valid.
 - Verify issuer, with trailing slash normalization.
-- Verify audience or `azp` against `client-id` when strict audience validation
-  is enabled.
-- Refresh JWKS and retry once when signature verification fails, to tolerate key
-  rotation.
+- When strict audience validation is enabled, require `aud` to contain
+  `client-id`; `azp` does not substitute for a mismatched audience.
+- Refresh JWKS and retry once for JOSE verification failures that can be caused
+  by key rotation; claims validation failures must not trigger a JWKS refresh.
 
 Username mapping uses the configured `username-claim`, then falls back to common
 claims such as `preferred_username`, `email`, and finally `sub`. Role mapping
@@ -173,7 +184,9 @@ mapped role. For non-admin users it calls the configured external
 If `authorization-endpoint` is empty, the current implementation allows
 non-admin access. Deployments that need authorization isolation must configure
 an external authorization endpoint or provide a stricter OIDC authority
-provider.
+provider. Since this contract explicitly uses the OAuth access token, the
+configuration model rejects `console-token-source=id_token` together with an
+external authorization endpoint.
 
 ## Java Client Integration
 
